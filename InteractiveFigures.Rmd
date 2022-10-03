@@ -1,0 +1,524 @@
+---
+title: "SMIF Database Interactive Plots"
+author: "Benjamin Uveges"
+date: '2022-10-03'
+output: html_document
+---
+<style type="text/css">
+.main-container {
+  max-width: 100% !important;
+  margin: auto;
+}
+</style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+list_of_packages = c("plotly","htmlwidgets","tidyverse", "MetBrewer","stringr", "readxl")
+
+lapply(list_of_packages, 
+       function(x) if(!require(x,character.only = TRUE)) install.packages(x))
+
+# Configuring database #### 
+coltypes <- c("text","text","text","text","text","text","text","numeric","numeric","numeric",
+              "text","text","text","text","text","text","text","numeric","numeric","numeric",
+              "numeric","numeric","numeric","numeric","text","text","text","text","numeric")
+df <- read_excel("New_MIF_database.xlsx", col_types = coltypes)
+
+# Setting phase factor levels and adding a simplified analysis type, spot/bulk
+df <- df %>% 
+  mutate(Phase = factor(Phase, 
+                        levels = c("Sulfide", "Sulfate","Total S","Sulfide + Organic S", "Organic S")),
+         Spot.Bulk = if_else(Analysis.Type %in% c("SIMS", "KrF Spot Fluorination, SF6","In-situ Laser","SHRIMP-SI",
+                                                  "CO2 Spot Laser FLuorination, SF6","LA-MC-ICP-MS (spot)"),"Spot","Bulk"))
+
+# Adding calculated columns of d33 and d36
+df <- df %>% mutate(d33s = (D33S + 1000*(((1+(d34s/1000))^0.515)-1)),
+                    d36s = (D36S + 1000*(((1+(d34s/1000))^1.90)-1)))
+
+# Adding time bin column. Bin size = cutW in millions of years.
+cutW <- 50  # Time bin size
+
+df <- df %>% 
+  mutate(group =cut_width(age.mean,cutW,closed="left"))
+df <- df %>% mutate(group.age  = parse_number(as.character(strsplit(as.character(df$group), ",")))+(cutW/2))
+
+# Finding data that conform to specific simpliefied lithologies
+carb <- grep("limestone|carbonate|dolomite|dolostone|wacke|marble",df$Lithology, ignore.case = TRUE)
+hsil <- grep("sand|quartzite|coarse|conglomerate|arenite|aenite|quartz",df$Lithology, ignore.case = TRUE)
+lsil <- grep("shale|silt|silstone|mud|phyllit|argillite|schist|marl|pelite",df$Lithology, ignore.case = TRUE)
+sulf <- grep("sulfate|evapo|barite|gypsum|anhydrite",df$Lithology, ignore.case = TRUE)
+chem <- grep("chert|iron|jasper|BIF|chemical|fe-oxyde|Sed BC|massive sulfide|macro|microscopic sulfide",df$Lithology, ignore.case = TRUE)
+microb <- grep("stromat|microb",df$Lithology, ignore.case = TRUE)
+alt <- grep("vein|ore body|hydrothermal|colloform|alteration|matatonalite",df$Lithology, ignore.case = TRUE)
+glac<- grep("glacial|diamictite|tillite|dropstone|gravity",df$Lithology, ignore.case = TRUE)
+ign <- grep("gabbro|basalt|intrusion|volcan|dyke|gneiss|ash|spherule|komati|mafic|dolerite|tuff|hornblende|pyroxene|lava|dacite|amphybollite",df$Lithology, ignore.case = TRUE)
+igsed <- grep("ash|tuff|volcanoclastic|silicified volcanic|volcanic sandstone|felsic volcanics",df$Lithology, ignore.case = TRUE)
+detr <- grep("detrital",df$Mineralogy, ignore.case = TRUE)
+bif <- grep("iron|jasper|BIF",df$Lithology, ignore.case = TRUE)
+df <- df %>% mutate(simp.lith = NA)
+
+# Assigning simplified lithologies based on above, in new column, Simp.Lith
+df$simp.lith[carb] <- "Carbonates"
+df$simp.lith[hsil] <- "High Energy Siliciclastic"
+df$simp.lith[sulf] <- "Sulfates"
+df$simp.lith[chem] <- "Chemical"
+df$simp.lith[lsil] <- "Low Energy Siliciclastic"
+df$simp.lith[microb] <- "Microbial"
+df$simp.lith[alt] <- "Altered/Late Addition"
+df$simp.lith[glac] <- "Glacial/Diamictite/Detrital"
+df$simp.lith[ign] <- "Igneous"
+df$simp.lith[igsed] <- "Volcanic Sed"
+df$simp.lith[is.na(df$simp.lith)] <- "None Provided"
+df$simp.lith[detr] <- "Glacial/Diamictite/Detrital"
+
+# Ordering simplified lithology factor levels
+df <- df %>% mutate(simp.lith = factor(simp.lith, levels = c("High Energy Siliciclastic",
+                                                             "Low Energy Siliciclastic","Carbonates",
+                                                             "Sulfates","Chemical","Microbial",
+                                                             "Altered/Late Addition",
+                                                             "Glacial/Diamictite/Detrital","Igneous","Volcanic Sed","None Provided")))
+# Adding 'Era' column, and setting factor level order
+df <- df %>% mutate(Era = if_else(age.mean>= 3600, 'Eoarchean',
+                                  if_else(age.mean>= 3200, 'Paleoarchean',
+                                          if_else(age.mean>= 2800, 'Mesoarchean',
+                                                  if_else(age.mean>= 2500, 'Neoarchean',
+                                                          if_else(age.mean>= 1600, 'Paleoproterozoic', 'Mesoproterozoic-Present')))))) %>% 
+  mutate(Era = factor(Era, levels =c('Eoarchean','Paleoarchean','Mesoarchean','Neoarchean','Paleoproterozoic', 'Mesoproterozoic-Present') )) %>% 
+  mutate(Phase2 = if_else(Phase == "Sulfide"&Spot.Bulk== "Bulk", "Sulfide Bulk", 
+                          if_else(Phase == "Sulfide"&Spot.Bulk== "Spot", "Sulfide Spot",
+                                  if_else(Phase == "Sulfate"&Spot.Bulk== "Bulk", "Sulfate Bulk",
+                                          if_else(Phase == "Sulfate"&Spot.Bulk== "Spot", "Sulfate Spot", as.character(Phase)))))) %>% 
+  mutate(Phase2=factor(Phase2, 
+                       levels = c("Sulfide Bulk", "Sulfide Spot", "Sulfate Bulk","Sulfate Spot",
+                                           "Total S", "Sulfide + Organic S", "Organic S")))
+
+df <- df %>% drop_na(D33S)
+
+# Gathering sulfur data to one column (dropping sig values), and setting factor levels
+dfgat <- select(df,-c(sig.d34s,sig.D33S,sig.D36S)) %>% 
+  gather(key = "name", value = "value",c(d34s,D33S,D36S)) %>% 
+  mutate(name = factor(name, levels = c("d34s","D33S","D36S")))
+
+# Setting palette
+pal <- MetBrewer::met.brewer(name = "Hokusai1",7)
+pal <- c(pal[7:1])
+
+```
+
+## Multiple Sulfur Isotope Record Through Time
+
+
+```{r D33STime, echo=FALSE, warning=FALSE, out.width='90%'}
+# ∆33S through time plot ####
+
+D33Stest <- plot_ly(data = df,  # setting data
+                 colors = pal, # setting colors
+                 x =~age.mean, 
+                 y =~D33S, 
+                 color =~Phase2, 
+                 #symbol = ~Spot.Bulk,symbols = c('circle','diamond'),  # setting aesthetics(mapping)
+                 #legendgroup= "SulfideBulk",
+                 showlegend=TRUE,
+                 visible = TRUE,
+                 text= ~paste("Type: ",Phase,"<br>Age (Myr): ", age.mean, # setting text for hover display
+                              "<br>Craton: ", Craton,
+                              "<br>Supergroup: ",Supergroup,
+                              "<br>Group: ", Group, 
+                              "<br>Subgroup: ", Subgroup,
+                              "<br>Formation: ", Formation, 
+                              "<br>Member: ", Member,
+                              "<br>Core: ", Core,
+                              "<br>Lithology: ", Lithology,
+                              "<br>Mineralogy: ", Mineralogy,
+                              "<br>Analysis Type: ", Analysis.Type,
+                              "<br>∆<sup>33</sup>S (‰): ", round(D33S,digits=2), "<br>Source: ", Source),
+                 hoverinfo = 'text', 
+                 customdata = paste0("https://scholar.google.com//scholar?hl=en&as_sdt=0%2C22&q=", df$DOI),
+                 type = 'scatter', mode = 'markers') %>%   # manually setting type to scatter point figure
+  # name = "δ<sup>34</sup>S (‰)") %>%  # setting name for legend
+  layout(yaxis = list(title='∆<sup>33</sup>S (‰)', hoverformat =  '.2f'),
+         legend = list(categoryorder = list("Sulfide Bulk", "Sulfide Spot", "Sulfate Bulk","Sulfate Spot",
+                                     "Total S Bulk", "Sulfide + Organic S Bulk", "Organic S Spot"))
+  )
+
+
+D33Stest <- D33Stest %>% layout(
+  title = "∆<sup>33</sup>S (‰) Through Time",
+  legend=list(title=list(text='<b>Sulfur Phase and <br>Analysis Type' )),
+  yaxis = list(title='∆<sup>33</sup>S (‰)', hoverformat =  '.2f'), # Setting y axis name
+  xaxis = list(title = "Age (Myr)",
+               autorange="reversed"),
+  font = list(size = 10),
+  annotations = 
+    list(x = 0.9, y = 0, text = "Uveges et al., 2022", 
+         showarrow = F, xref='paper', yref='paper', 
+         xanchor='right', yanchor='auto', xshift=0, yshift=0,
+         font=list(size=15, color="grey")),
+  margin = list(b = 100, l = 50, t = 50)) %>% 
+  add_markers(customdata = paste0("https://scholar.google.com//scholar?hl=en&as_sdt=0%2C22&q=", df$DOI),
+                                    showlegend=FALSE, visible = FALSE)
+
+p2 <- onRender(
+  D33Stest, "
+  function(el) {
+    el.on('plotly_click', function(d) {
+      var url = d.points[0].customdata;
+      window.open(url);
+    });
+  }
+")
+
+#p <- htmlwidgets::saveWidget(partial_bundle(as_widget(p2)), "Cap33S_time_fig2.html")
+p2
+
+```
+
+## ∆/∆ Relationships, Binned by Time Period
+
+
+```{r CapCap, echo=FALSE, warning=FALSE, out.width='90%'}
+
+cpd <- df %>% 
+  mutate(Era = if_else(age.mean>= 3600, 'Eoarchean',
+                       if_else(age.mean>= 3200, 'Paleoarchean',
+                               if_else(age.mean>= 2800, 'Mesoarchean',
+                                       if_else(age.mean>= 2500, 'Neoarchean',
+                                               if_else(age.mean>= 1600, 'Paleoproterozoic', 'Mesoproterozoic-Present')))))) %>% 
+  mutate(Era = factor(Era, levels =c('Eoarchean','Paleoarchean','Mesoarchean','Neoarchean','Paleoproterozoic', 'Mesoproterozoic-Present') )) %>% 
+  drop_na(D33S,D36S)
+
+# Creating list objects of Archean array and MDF slope lines (figure out more complicated shapes?)
+ARA <- list(type = "line",
+            opacity = 0.3,
+            line = list(color = "grey", opacity=0.8, width = 5),
+            x0 = -5, x1 = 11, xref = "x",
+            y0 = -5*-0.9, y1 = 11*-0.9, yref = "y",
+            name = "Archean Array")
+MDF <- list(type = "line",
+            opacity = 0.3,
+            line = list(color = "grey", opacity=0.8,width =5),
+            x0 = 6/-7, x1 = -13/-7, xref = "x",
+            y0 = 6, y1 = -13, yref = "y",
+            name = "Mass Dependent")
+
+pal2 <- MetBrewer::met.brewer(name = "Hokusai1",6)
+# Manually building CP interactive plot trace by trace.
+# Creating density objects for each Era bin ∆33
+D33densEo <- density(cpd$D33S[which(cpd$Era == "Eoarchean")], na.rm=TRUE,bw=0.25)
+D33densPaleo <- density(cpd$D33S[which(cpd$Era == "Paleoarchean")], na.rm=TRUE,bw=0.25)
+D33densMeso <- density(cpd$D33S[which(cpd$Era == "Mesoarchean")], na.rm=TRUE,bw=0.25)
+D33densNeo <- density(cpd$D33S[which(cpd$Era == "Neoarchean")], na.rm=TRUE,bw=0.25)
+D33densPalPro <- density(cpd$D33S[which(cpd$Era == "Paleoproterozoic")], na.rm=TRUE,bw=0.25)
+D33densPPM <- density(cpd$D33S[which(cpd$Era == "Mesoproterozoic-Present")], na.rm=TRUE,bw=0.25)
+
+# Creating density plot, trace by trace
+h33b <- plot_ly(x=~D33densEo$x, y=~D33densEo$y,
+                type = 'scatter', mode = 'none', name = 'Eoarchean', fill = 'tozeroy', fillcolor = pal2[1], legendgroup="group1")
+h33b <- h33b %>% add_trace(x=~D33densPaleo$x, y=~D33densPaleo$y,
+                           type = 'scatter', mode = 'none', name = 'Paleoarchean', fill = 'tozeroy', fillcolor = pal2[2], legendgroup="group2")
+h33b <- h33b %>% add_trace(x=~D33densMeso$x, y=~D33densMeso$y,
+                           type = 'scatter', mode = 'none', name = 'Mesoarchean', fill = 'tozeroy',fillcolor = pal2[3], legendgroup="group3")
+h33b <- h33b %>% add_trace(x=~D33densNeo$x, y=~D33densNeo$y,
+                           type = 'scatter', mode = 'none', name = 'Neoarchean', fill = 'tozeroy',fillcolor = pal2[4], legendgroup="group4")
+h33b <- h33b %>% add_trace(x=~D33densPalPro$x, y=~D33densPalPro$y,
+                           type = 'scatter', mode = 'none', name = 'Paleoproterozoic', fill = 'tozeroy',fillcolor = pal2[5], legendgroup="group5")
+h33b <- h33b %>% add_trace(x=~D33densPPM$x, y=~D33densPPM$y,
+                           type = 'scatter', mode = 'none', name = 'Mesoproterozoic-Present', fill = 'tozeroy',fillcolor = pal2[6], legendgroup="group6")
+h33b <- h33b%>% layout(xaxis = list(title='∆<sup>33</sup>S (‰)'), 
+                       yaxis= list(title='Density')
+                       )
+
+# Creating density objects for each Era bin ∆36
+D36densEo <- density(cpd$D36S[which(cpd$Era == "Eoarchean")], na.rm=TRUE,bw=0.25)
+D36densPaleo <- density(cpd$D36S[which(cpd$Era == "Paleoarchean")], na.rm=TRUE,bw=0.25)
+D36densMeso <- density(cpd$D36S[which(cpd$Era == "Mesoarchean")], na.rm=TRUE,bw=0.25)
+D36densNeo <- density(cpd$D36S[which(cpd$Era == "Neoarchean")], na.rm=TRUE,bw=0.25)
+D36densPalPro <- density(cpd$D36S[which(cpd$Era == "Paleoproterozoic")], na.rm=TRUE,bw=0.25)
+D36densPPM <- density(cpd$D36S[which(cpd$Era == "Mesoproterozoic-Present")], na.rm=TRUE,bw=0.25)
+
+
+h36b <- plot_ly(x=~D36densEo$x, y=~D36densEo$y,
+                type = 'scatter', mode = 'none', name = 'Eoarchean', fill = 'tozeroy',fillcolor = pal2[1], legendgroup="group1", showlegend=FALSE)
+h36b <- h36b %>% add_trace(x=~D36densPaleo$x, y=~D36densPaleo$y,
+                           type = 'scatter', mode = 'none', name = 'Paleoarchean', fill = 'tozeroy',fillcolor = pal2[2], legendgroup="group2", showlegend=FALSE)
+h36b <- h36b %>% add_trace(x=~D36densMeso$x, y=~D36densMeso$y,
+                           type = 'scatter', mode = 'none', name = 'Mesoarchean', fill = 'tozeroy',fillcolor = pal2[3], legendgroup="group3", showlegend=FALSE)
+h36b <- h36b %>% add_trace(x=~D36densNeo$x, y=~D36densNeo$y,
+                           type = 'scatter', mode = 'none', name = 'Neoarchean', fill = 'tozeroy',fillcolor = pal2[4], legendgroup="group4", showlegend=FALSE)
+h36b <- h36b %>% add_trace(x=~D36densPalPro$x, y=~D36densPalPro$y,
+                           type = 'scatter', mode = 'none', name = 'Paleoproterozoic', fill = 'tozeroy',fillcolor = pal2[5], legendgroup="group5", showlegend=FALSE)
+h36b <- h36b %>% add_trace(x=~D36densPPM$x, y=~D36densPPM$y,
+                           type = 'scatter', mode = 'none', name = 'Mesoproterozoic-Present', fill = 'tozeroy',fillcolor = pal2[6], legendgroup="group6", showlegend=FALSE)
+h36b <- h36b %>% layout(xaxis = list(title='Top: ∆<sup>33</sup>S (‰), Bottom: ∆<sup>36</sup>S (‰)'), 
+                        yaxis= list(title='Density')
+                        )
+
+h <- subplot(h33b,h36b, nrows = 2, shareX = TRUE)
+
+pal3 <- c(pal[6:1])
+cp <- plot_ly(data =cpd[which(cpd$Era == "Eoarchean"),], x = ~D33S, y= ~D36S, color =~Era,  # Assinging data and mapping
+              colors =pal3,
+              legendgroup="group1",showlegend=FALSE,# color palette
+              text= ~paste("Type: ",Phase,"<br>Age (Myr): ", age.mean, # setting text for hover display
+                           "<br>Craton: ", Craton,
+                           "<br>Supergroup: ",Supergroup,
+                           "<br>Group: ", Group, 
+                           "<br>Subgroup: ", Subgroup,
+                           "<br>Formation: ", Formation, 
+                           "<br>Member: ", Member,
+                           "<br>Core: ", Core,
+                           "<br>Lithology ", Lithology,
+                           "<br>Mineralogy: ", Mineralogy,
+                           "<br>Analysis Type: ", Analysis.Type,
+                           "<br>∆<sup>33</sup>S (‰): ", round(D33S,2),
+                           "<br>∆<sup>36</sup>S (‰): ", round(D36S,2),
+                           "<br>Source: ", Source),
+              hoverinfo = 'text',
+              customdata = paste0("https://scholar.google.com//scholar?hl=en&as_sdt=0%2C22&q=", cpd$DOI[which(cpd$Era == "Eoarchean")]),
+              type = 'scatter', mode = 'markers') %>% 
+  layout(yaxis = list(title='∆<sup>36</sup>S (‰)'),
+         xaxis = list(title='∆<sup>33</sup>S (‰)'),
+         font = list(size = 10),
+         updatemenus = list(
+           list(
+             xref = 'paper',
+             yref='paper',
+             y=0.98,
+             x=0.45,
+             pad = list('r'= 0, 't'= 5, 'b' = 5),
+             type = "buttons",
+             buttons = list(
+               list(label = "None",
+                    method = "relayout",
+                    args = list(list(shapes = list(c())))
+               ),
+               list(
+                 label = "Archean Array",
+                 method = "relayout",
+                 args = list(list(shapes = list(ARA,c(),c(),c())))
+               ),
+               list(label = "Mass Dependent",
+                    method = "relayout",
+                    args = list(list(shapes = list(MDF,c(),c(),c())))
+               ),
+               list(label = "All",
+                    method = "relayout",
+                    args = list(list(shapes = list(MDF,ARA,c(),c())))
+               )
+             )
+             )
+           )
+         )
+cp <- cp %>% add_trace(data =cpd[which(cpd$Era == "Paleoarchean"),], x = ~D33S, y= ~D36S, color =~Era,  # Assinging data and mapping
+                       colors =pal3,legendgroup="group2",showlegend=FALSE ,
+                       customdata = paste0("https://scholar.google.com//scholar?hl=en&as_sdt=0%2C22&q=", cpd$DOI[which(cpd$Era == "Paleoarchean")]))
+cp <- cp %>% add_trace(data =cpd[which(cpd$Era == "Mesoarchean"),], x = ~D33S, y= ~D36S, color =~Era,  # Assinging data and mapping
+                       colors =pal3,legendgroup="group3",showlegend=FALSE ,
+                       customdata = paste0("https://scholar.google.com//scholar?hl=en&as_sdt=0%2C22&q=", cpd$DOI[which(cpd$Era == "Mesoarchean")]))
+cp <- cp %>% add_trace(data =cpd[which(cpd$Era == "Neoarchean"),], x = ~D33S, y= ~D36S, color =~Era,  # Assinging data and mapping
+                       colors =pal3,legendgroup="group4",showlegend=FALSE,
+                       customdata = paste0("https://scholar.google.com//scholar?hl=en&as_sdt=0%2C22&q=", cpd$DOI[which(cpd$Era == "Neoarchean")]))
+cp <- cp %>% add_trace(data =cpd[which(cpd$Era == "Paleoproterozoic"),], x = ~D33S, y= ~D36S, color =~Era,  # Assinging data and mapping
+                       colors =pal3,legendgroup="group5",showlegend=FALSE,
+                       customdata = paste0("https://scholar.google.com//scholar?hl=en&as_sdt=0%2C22&q=", cpd$DOI[which(cpd$Era == "Paleoproterozoic")]))
+cp <- cp %>% add_trace(data =cpd[which(cpd$Era == "Mesoproterozoic-Present"),], x = ~D33S, y= ~D36S, color =~Era,  # Assinging data and mapping
+                       colors =pal3,legendgroup="group6",showlegend=FALSE,
+                       customdata = paste0("https://scholar.google.com//scholar?hl=en&as_sdt=0%2C22&q=", cpd$DOI[which(cpd$Era == "Mesoproterozoic-Present")]))
+
+sub <- subplot(cp,h, widths = c(0.6, 0.4), titleX = TRUE,titleY = TRUE) %>% layout(legend = list(orientation = "h",
+                                                                                                 xanchor = "center",
+                                                                                                 x = 0.5, y = 1.1))
+
+sub <- onRender(
+  sub, "
+  function(el) {
+    el.on('plotly_click', function(d) {
+      var url = d.points[0].customdata;
+      window.open(url);
+    });
+  }
+")
+
+sub
+#CapCap <- htmlwidgets::saveWidget(partial_bundle(as_widget(sub)), "CapCapS_fig.html")
+#CapCap
+
+```
+
+
+# ∆/δ Relationships, Binned by Time Period
+
+```{r Capdel, echo=FALSE, warning=FALSE, out.width='90%'}
+
+cpd <- df %>% 
+  mutate(Era = if_else(age.mean>= 3600, 'Eoarchean',
+                       if_else(age.mean>= 3200, 'Paleoarchean',
+                               if_else(age.mean>= 2800, 'Mesoarchean',
+                                       if_else(age.mean>= 2500, 'Neoarchean',
+                                               if_else(age.mean>= 1600, 'Paleoproterozoic', 'Mesoproterozoic-Present')))))) %>% 
+  mutate(Era = factor(Era, levels =c('Eoarchean','Paleoarchean','Mesoarchean','Neoarchean','Paleoproterozoic', 'Mesoproterozoic-Present') )) %>% 
+  drop_na(d34s,D33S)
+
+# Creating list objects of Archean array and MDF slope lines (figure out more complicated shapes?)
+ARA <- list(type = "line",
+            opacity = 0.3,
+            line = list(color = "grey", opacity=0.8, width = 5),
+            x0 = -5, x1 = 15, xref = "x",
+            y0 = -5, y1 = 15, yref = "y",
+            name = "Archean Array")
+
+
+# Manually building CP interactive plot trace by trace....
+# Creating density objects for each Era bin ∆33
+d34densEo <- density(cpd$d34s[which(cpd$Era == "Eoarchean")], na.rm=TRUE,bw=3)
+d34densPaleo <- density(cpd$d34s[which(cpd$Era == "Paleoarchean")], na.rm=TRUE,bw=3)
+d34densMeso <- density(cpd$d34s[which(cpd$Era == "Mesoarchean")], na.rm=TRUE,bw=3)
+d34densNeo <- density(cpd$d34s[which(cpd$Era == "Neoarchean")], na.rm=TRUE,bw=3)
+d34densPalPro <- density(cpd$d34s[which(cpd$Era == "Paleoproterozoic")], na.rm=TRUE,bw=3)
+d34densPPM <- density(cpd$d34s[which(cpd$Era == "Mesoproterozoic-Present")], na.rm=TRUE,bw=3)
+
+# Creating density plot, trace by trace
+h34b <- plot_ly(x=~d34densEo$x, y=~d34densEo$y,
+                type = 'scatter', mode = 'none', name = 'Eoarchean', fill = 'tozeroy', fillcolor = pal2[1], legendgroup="group1")
+h34b <- h34b %>% add_trace(x=~d34densPaleo$x, y=~d34densPaleo$y,
+                           type = 'scatter', mode = 'none', name = 'Paleoarchean', fill = 'tozeroy', fillcolor = pal2[2], legendgroup="group2")
+h34b <- h34b %>% add_trace(x=~d34densMeso$x, y=~d34densMeso$y,
+                           type = 'scatter', mode = 'none', name = 'Mesoarchean', fill = 'tozeroy',fillcolor = pal2[3], legendgroup="group3")
+h34b <- h34b %>% add_trace(x=~d34densNeo$x, y=~d34densNeo$y,
+                           type = 'scatter', mode = 'none', name = 'Neoarchean', fill = 'tozeroy',fillcolor = pal2[4], legendgroup="group4")
+h34b <- h34b %>% add_trace(x=~d34densPalPro$x, y=~d34densPalPro$y,
+                           type = 'scatter', mode = 'none', name = 'Paleoproterozoic', fill = 'tozeroy',fillcolor = pal2[5], legendgroup="group5")
+h34b <- h34b %>% add_trace(x=~d34densPPM$x, y=~d34densPPM$y,
+                           type = 'scatter', mode = 'none', name = 'Mesoproterozoic-Present', fill = 'tozeroy',fillcolor = pal2[6], legendgroup="group6")
+h34b <- h34b%>% layout(xaxis = list(title='∆<sup>33</sup>S (‰)'), 
+                       yaxis= list(title='Density')
+                       #images = list(
+                        # list(source = raster2uri(as.raster(summons)),
+                         #     xref = "paper",
+                          #    yref = "paper",
+                           #   x= 0.85,
+                            #  y= 0.75,
+                             # sizex = 0.25,
+                              #sizey = 0.25,
+                              #opacity=0.5,
+                              #xanchor = "left", yanchor = "bottom"
+                         #))
+                       )
+
+# Creating density objects for each Era bin ∆36
+D33densEo <- density(cpd$D33S[which(cpd$Era == "Eoarchean")], na.rm=TRUE,bw=0.25)
+D33densPaleo <- density(cpd$D33S[which(cpd$Era == "Paleoarchean")], na.rm=TRUE,bw=0.25)
+D33densMeso <- density(cpd$D33S[which(cpd$Era == "Mesoarchean")], na.rm=TRUE,bw=0.25)
+D33densNeo <- density(cpd$D33S[which(cpd$Era == "Neoarchean")], na.rm=TRUE,bw=0.25)
+D33densPalPro <- density(cpd$D33S[which(cpd$Era == "Paleoproterozoic")], na.rm=TRUE,bw=0.25)
+D33densPPM <- density(cpd$D33S[which(cpd$Era == "Mesoproterozoic-Present")], na.rm=TRUE,bw=0.25)
+
+
+h33b <- plot_ly(x=~D33densEo$x, y=~D33densEo$y,
+                type = 'scatter', mode = 'none', name = 'Eoarchean', fill = 'tozeroy',fillcolor = pal2[1], legendgroup="group1", showlegend=FALSE)
+h33b <- h33b %>% add_trace(x=~D33densPaleo$x, y=~D33densPaleo$y,
+                           type = 'scatter', mode = 'none', name = 'Paleoarchean', fill = 'tozeroy',fillcolor = pal2[2], legendgroup="group2", showlegend=FALSE)
+h33b <- h33b %>% add_trace(x=~D33densMeso$x, y=~D33densMeso$y,
+                           type = 'scatter', mode = 'none', name = 'Mesoarchean', fill = 'tozeroy',fillcolor = pal2[3], legendgroup="group3", showlegend=FALSE)
+h33b <- h33b %>% add_trace(x=~D33densNeo$x, y=~D33densNeo$y,
+                           type = 'scatter', mode = 'none', name = 'Neoarchean', fill = 'tozeroy',fillcolor = pal2[4], legendgroup="group4", showlegend=FALSE)
+h33b <- h33b %>% add_trace(x=~D33densPalPro$x, y=~D33densPalPro$y,
+                           type = 'scatter', mode = 'none', name = 'Paleoproterozoic', fill = 'tozeroy',fillcolor = pal2[5], legendgroup="group5", showlegend=FALSE)
+h33b <- h33b %>% add_trace(x=~D33densPPM$x, y=~D33densPPM$y,
+                           type = 'scatter', mode = 'none', name = 'Mesoproterozoic-Present', fill = 'tozeroy',fillcolor = pal2[6], legendgroup="group6", showlegend=FALSE)
+h33b <- h33b %>% layout(xaxis = list(title='Top: 𝛿<sup>34</sup>S (‰), Bottom: ∆<sup>33</sup>S (‰)'), 
+                        yaxis= list(title='Density')
+                        #images = list(
+                         # list(source = raster2uri(as.raster(mit)),
+                          #     xref = "paper",
+                           #    yref = "paper",
+                            #   x= 0.8,
+                             #  y= 0.8,
+                              # sizex = 0.25,
+                               #sizey = 0.25,
+                               #opacity = 0.5,
+                               #xanchor = "left", yanchor = "bottom"
+                          #))
+                        )
+
+h <- subplot(h34b,h33b, nrows = 2, shareX = TRUE)
+
+
+cp <- plot_ly(data =cpd[which(cpd$Era == "Eoarchean"),], x = ~d34s, y= ~D33S, color =~Era,  # Assinging data and mapping
+              colors =pal3,
+              legendgroup="group1",showlegend=FALSE,# color palette
+              text= ~paste("Type: ",Phase,"<br>Age (Myr): ", age.mean, # setting text for hover display
+                           "<br>Craton: ", Craton,
+                           "<br>Supergroup: ",Supergroup,
+                           "<br>Group: ", Group, 
+                           "<br>Subgroup: ", Subgroup,
+                           "<br>Formation: ", Formation, 
+                           "<br>Member: ", Member,
+                           "<br>Core: ", Core,
+                           "<br>Lithology ", Lithology,
+                           "<br>Mineralogy: ", Mineralogy,
+                           "<br>Analysis Type: ", Analysis.Type,
+                           "<br>𝛿<sup>34</sup>S (‰): ", round(d34s,2),
+                           "<br>∆<sup>33</sup>S (‰): ", round(D33S,2),
+                           "<br>Source: ", Source),
+              customdata = paste0("https://scholar.google.com//scholar?hl=en&as_sdt=0%2C22&q=", cpd$DOI[which(cpd$Era == "Eoarchean")]),
+              hoverinfo = 'text',
+              type = 'scatter', mode = 'markers') %>% 
+  layout(yaxis = list(title='∆<sup>33</sup>S (‰)'),
+         xaxis = list(title='𝛿<sup>34</sup>S (‰)'),
+         font = list(size = 10),
+         pad = list('r'= 0, 't'= 5, 'b' = 5),
+         updatemenus = list(
+           list(
+             xref = 'paper',yref='paper',
+             y=0.98,x=0.45,
+             type = "buttons",
+             buttons = list(
+               list(label = "None",
+                    method = "relayout",
+                    args = list(list(shapes = list(c())))
+               ),
+               list(
+                 label = "Archean Array",
+                 method = "relayout",
+                 args = list(list(shapes = list(ARA,c())))
+               )
+             )
+           )))
+cp <- cp %>% add_trace(data =cpd[which(cpd$Era == "Paleoarchean"),], x = ~d34s, y= ~D33S, color =~Era,  # Assinging data and mapping
+                       colors =pal3,legendgroup="group2",showlegend=FALSE,
+                       customdata = paste0("https://scholar.google.com//scholar?hl=en&as_sdt=0%2C22&q=", cpd$DOI[which(cpd$Era == "Paleoarchean")]))
+cp <- cp %>% add_trace(data =cpd[which(cpd$Era == "Mesoarchean"),], x = ~d34s, y= ~D33S, color =~Era,  # Assinging data and mapping
+                       colors =pal3,legendgroup="group3",showlegend=FALSE,
+                       customdata = paste0("https://scholar.google.com//scholar?hl=en&as_sdt=0%2C22&q=", cpd$DOI[which(cpd$Era == "Mesoarchean")]))
+cp <- cp %>% add_trace(data =cpd[which(cpd$Era == "Neoarchean"),], x = ~d34s, y= ~D33S, color =~Era,  # Assinging data and mapping
+                       colors =pal3,legendgroup="group4",showlegend=FALSE,
+                       customdata = paste0("https://scholar.google.com//scholar?hl=en&as_sdt=0%2C22&q=", cpd$DOI[which(cpd$Era == "Neoarchean")]))
+cp <- cp %>% add_trace(data =cpd[which(cpd$Era == "Paleoproterozoic"),], x = ~d34s, y= ~D33S, color =~Era,  # Assinging data and mapping
+                       colors =pal3,legendgroup="group5",showlegend=FALSE,
+                       customdata = paste0("https://scholar.google.com//scholar?hl=en&as_sdt=0%2C22&q=", cpd$DOI[which(cpd$Era == "Paleoproterozoic")]))
+cp <- cp %>% add_trace(data =cpd[which(cpd$Era == "Mesoproterozoic-Present"),], x = ~d34s, y= ~D33S, color =~Era,  # Assinging data and mapping
+                       colors =pal3,legendgroup="group6",showlegend=FALSE,
+                       customdata = paste0("https://scholar.google.com//scholar?hl=en&as_sdt=0%2C22&q=", cpd$DOI[which(cpd$Era == "Mesoproterozoic-Present")]))
+
+sub <- subplot(cp,h, widths = c(0.6, 0.4), titleX = TRUE,titleY = TRUE) %>% layout(legend = list(orientation = "h",
+                                                                                                 xanchor = "center",
+                                                                                                 x = 0.5, y = 1.1))
+
+
+sub <- onRender(
+  sub, "
+  function(el) {
+    el.on('plotly_click', function(d) {
+      var url = d.points[0].customdata;
+      window.open(url);
+    });
+  }
+")
+
+sub
+#Capdel <- htmlwidgets::saveWidget(partial_bundle(as_widget(sub)), "CapdelS_fig.html")
+#Capdel
+
+```
