@@ -155,9 +155,9 @@ D33Stest <- D33Stest %>% layout(
          showarrow = F, xref='paper', yref='paper', 
          xanchor='right', yanchor='auto', xshift=0, yshift=0,
          font=list(size=15, color="grey")),
-  margin = list(b = 100, l = 50, t = 50)) %>% 
-  add_markers(customdata = paste0("https://scholar.google.com//scholar?hl=en&as_sdt=0%2C22&q=", df$DOI),
-                                    showlegend=FALSE, visible = FALSE)
+  margin = list(b = 100, l = 50, t = 50))# %>% 
+ # add_markers(customdata = paste0("https://scholar.google.com//scholar?hl=en&as_sdt=0%2C22&q=", df$DOI),
+                                  #  showlegend=FALSE, visible = FALSE)
 
 p2 <- onRender(
   D33Stest, "
