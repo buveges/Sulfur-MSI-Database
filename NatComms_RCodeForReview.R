@@ -1,5 +1,7 @@
-# R code utilised in Uveges et al., 2022 - Reconciling discrepant minor sulphur isotope records of the Great Oxidation Event
-## DOI: 
+# R code utilized in Uveges et al., 2023 - Reconciling discrepant minor sulfur isotope records of the Great Oxidation Event
+## (DOI:10.1038/s41467-023-35820-w)
+
+## Link to paper: https://www.nature.com/articles/s41467-023-35820-w 
 
 ## To make review of this code easier, we have arranged the analyses according to the figures that they
 ##    are associated with in the main text/supplement. For example, the Bayesian statistical analysis

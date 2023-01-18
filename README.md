@@ -1,12 +1,14 @@
 # Sulfur-MSI-Database
-Github repo of sulfur isotope database with interactive figures and code associated with Uveges et al., 2023. (DOI to come)
+Github repo of sulfur isotope database with interactive figures and code associated with Uveges et al., 2023. (DOI:10.1038/s41467-023-35820-w)
 
-The full database can be downloaded vie the "New_MIF_database.xlsx" file.
+Link to paper: https://www.nature.com/articles/s41467-023-35820-w 
+
+The full database can be downloaded via the "New_MIF_database.xlsx" file.
 
 Interactive figures display the data from the database, and when clicking on a data point, will open up a new tab linking to a google scholar entry for the paper that sources that data point.
 
 
-## Decription of code and other data associated with - Reconciling discrepant minor sulphur isotope records of the Great Oxidation Event
+## Decription of code and other data associated with - Reconciling discrepant minor sulfur isotope records of the Great Oxidation Event
 Authors:
 Benjamin T. Uveges(a,1), Gareth Izon(a), Shuhei Ono(a), Nicolas J. Beukes(b), Roger E. Summons(a)
 
